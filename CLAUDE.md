@@ -8,6 +8,47 @@ vscsiStats Helper is a Python tool for profiling ESXi VM storage workloads and g
 
 **Current Phase**: Planning & Architecture Design (implementation has not yet begun)
 
+## Development Requirements
+
+### Python Package Management
+
+**IMPORTANT**: This project uses [`uv`](https://github.com/astral-sh/uv) for all Python package management and virtual environment operations.
+
+**Do NOT use**:
+- `pip install`
+- `python -m venv`
+- `virtualenv`
+
+**Use instead**:
+- `uv venv` - Create virtual environment
+- `uv pip install` - Install packages
+- `uv pip sync` - Sync dependencies from requirements file
+- `uv run` - Run commands in the virtual environment
+
+**Common commands**:
+```bash
+# Create virtual environment
+uv venv
+
+# Activate (if needed for manual operations)
+source .venv/bin/activate
+
+# Install development dependencies
+uv pip install -r requirements-dev.txt
+
+# Install project in editable mode
+uv pip install -e .
+
+# Run tests
+uv run pytest
+
+# Format code
+uv run black src/ tests/
+
+# Lint code
+uv run ruff check src/ tests/
+```
+
 ## Key Documents
 
 - **README.md**: Project vision, use cases, and design decisions
