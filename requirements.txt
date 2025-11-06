@@ -1,0 +1,8 @@
+# Core dependencies
+paramiko>=3.0.0
+click>=8.0.0
+pandas>=2.0.0
+numpy>=1.24.0
+matplotlib>=3.7.0
+pyyaml>=6.0
+python-daemon>=3.0.0
