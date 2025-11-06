@@ -213,27 +213,74 @@ Each job is stored in a dedicated directory:
 
 ### vscsiStats CSV Format
 
-vscsiStats outputs histogram data in CSV format. Example:
+vscsiStats outputs histogram data as multiple separate histogram sections, each measuring a different characteristic. Each section has its own histogram bins and statistics.
+
+**Format Structure**:
+
+Each histogram section follows this pattern:
+1. Header line identifying the histogram type and target VM/LUN
+2. Summary statistics (min, max, mean, count)
+3. Column headers: `Frequency,Histogram Bucket Limit`
+4. Data rows: frequency count and bucket limit pairs
+
+**Example** (abbreviated from real output):
 
 ```csv
-# This is a vscsiStats histogram output
-# VM: SQL-Server-01, World Group: 12345, LUN: vmhba1:C0:T0:L0
-IOLength(bytes),Seeks(sectors),OutstandingIOs,Latency(ms),Count,Type
-512,0,1,0.5,145,Read
-4096,0,1,0.8,892,Read
-8192,0,1,1.2,3421,Read
-8192,8,1,1.5,234,Read
-4096,0,2,2.1,112,Write
+Histogram: IO lengths of commands,virtual machine worldGroupID,2099979,virtual disk handleID,8194 (scsi0:0)
+min,512
+max,65536
+mean,5332
+count,793
+Frequency,Histogram Bucket Limit
+42,512
+1,1024
+5,2048
+608,4096
+90,8192
+11,32768
+...
+
+Histogram: IO lengths of Read commands,virtual machine worldGroupID,2099979,virtual disk handleID,8194 (scsi0:0)
+min,4096
+max,32768
+mean,25600
+count,4
+Frequency,Histogram Bucket Limit
+1,4096
+3,32768
+...
+
+Histogram: latency of IOs in Microseconds (us),virtual machine worldGroupID,2099979,virtual disk handleID,8194 (scsi0:0)
+min,40
+max,51537
+mean,392
+count,793
+Frequency,Histogram Bucket Limit
+403,100
+304,500
+78,1000
+4,5000
 ...
 ```
 
-**Key Fields**:
-- `IOLength(bytes)`: Block size of the I/O operation
-- `Seeks(sectors)`: Distance from previous I/O (0 = sequential)
-- `OutstandingIOs`: Queue depth at time of I/O
-- `Latency(ms)`: Latency bucket (histogram bucket center)
-- `Count`: Number of I/Os in this histogram bucket
-- `Type`: Read or Write
+**Histogram Types** (each has total, read, and write variants):
+
+1. **IO lengths** - Block sizes in bytes
+2. **Distance between successive commands** - Seek distance in LBNs (Logical Block Numbers)
+   - Used to determine sequential vs. random I/O
+   - Distance = 1 typically indicates sequential
+   - Negative values indicate backward seeks
+3. **Distance from closest of previous 16** - Spatial locality metric
+4. **Latency** - I/O latency in microseconds
+5. **Number of outstanding IOs** - Queue depth when new I/O is issued
+6. **IO interarrival time** - Time between I/O operations in microseconds
+
+**Key Parsing Considerations**:
+- Each histogram is independent with different bin boundaries
+- Bins are upper limits (values ≤ bucket limit fall in that bucket)
+- Must parse multiple histogram sections per sample
+- Summary statistics (min, max, mean, count) provide quick metrics
+- World Group ID and Handle ID are embedded in header lines
 
 ### Analysis Summary Schema (`analysis/summary.json`)
 
@@ -1098,7 +1145,7 @@ def load_config(config_path=None):
 - [ ] Set up Python project structure
 - [ ] Configure development environment
 
-### Phase 1: MVP - Core Collection (Week 1-2)
+### Phase 1: MVP - Core Collection
 **Goal**: Start a job, collect samples, stop a job
 
 - [ ] Module: `core/ssh.py` - SSH connection with retry
@@ -1113,7 +1160,7 @@ def load_config(config_path=None):
 
 **Deliverable**: Can start/stop a single collection job and view raw CSV data
 
-### Phase 2: Analysis & Output Generation (Week 2-3)
+### Phase 2: Analysis & Output Generation
 **Goal**: Analyze collected data and generate fio job files
 
 - [ ] Module: `analysis/filter.py` - Percentile filtering (other methods later)
@@ -1125,7 +1172,7 @@ def load_config(config_path=None):
 
 **Deliverable**: Can analyze completed jobs and produce working fio job files
 
-### Phase 3: Daemon & IPC (Week 3-4)
+### Phase 3: Daemon & IPC
 **Goal**: Background daemon with proper CLI communication
 
 - [ ] Module: `utils/ipc.py` - Unix socket IPC protocol
@@ -1139,7 +1186,7 @@ def load_config(config_path=None):
 
 **Deliverable**: Daemon manages multiple concurrent jobs, CLI communicates via IPC
 
-### Phase 4: Discovery & Polish (Week 4-5)
+### Phase 4: Discovery & Polish
 **Goal**: Complete user experience
 
 - [ ] CLI: `discover` command (list VMs/LUNs)
@@ -1152,7 +1199,7 @@ def load_config(config_path=None):
 
 **Deliverable**: Full-featured tool ready for real-world use
 
-### Phase 5: Hardening (Week 5-6)
+### Phase 5: Hardening
 **Goal**: Production readiness
 
 - [ ] Comprehensive error handling
