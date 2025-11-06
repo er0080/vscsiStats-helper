@@ -28,7 +28,7 @@ vscsiStats Helper provides an end-to-end pipeline:
 
 ## Target Audience
 
-Storage designers and architects who need to:
+Storage engineers and system architects who need to:
 - Understand real-world application I/O characteristics
 - Design storage systems for peak workload capacity
 - Optimize storage configurations based on actual usage patterns
@@ -104,7 +104,7 @@ The analysis engine extracts key I/O parameters:
 
 **Spatial Characteristics**:
 - Logical block distance analysis
-- Sequential I/O detection (distance = +1)
+- Sequential I/O detection (distance = +1, or user-defined threshold)
 - Random I/O identification
 
 ### Output Formats
@@ -291,80 +291,108 @@ ssh:
   retry_attempts: 3
 ```
 
-## Open Questions & Design Decisions
+## Design Decisions
 
-The following items require further discussion and decision-making:
+The following design decisions have been finalized and will guide implementation:
 
 ### 1. Job Management & Storage
-- **Data storage location**: Where should collected data be stored?
-  - System-wide: `/var/lib/vscsiStats-helper/`
-  - User-specified directory
-  - Both with configurable default
-- **Job identifiers**: How are jobs uniquely identified?
-  - Timestamp-based: `job-20251105-143022`
-  - UUID-based: `job-a1b2c3d4-e5f6...`
-  - User-provided friendly names with fallback
-- **Job lifecycle**: How long are completed jobs retained?
-  - Manual deletion only
-  - Auto-cleanup after N days
-  - User-configurable retention policy
+
+**Data Storage Location**
+- User-specified directory only (via `--data-dir` CLI flag or config file setting)
+- No system-wide `/var/lib/` requirement
+- No sudo/root privileges needed
+- Each user manages their own job data independently
+- Default location: `~/.vscsiStats-helper/data/` if not specified
+
+**Job Identifiers**
+- User-provided friendly names with automatic timestamp fallback
+- Examples: `sql-server-peak`, `web-app-baseline`, `prod-db-monday`
+- Auto-generated fallback: `job-YYYYMMDD-HHMMSS` (e.g., `job-20251105-143022`)
+- Job names must be unique within a data directory
+
+**Job Lifecycle & Retention**
+- Manual deletion only via `vscsi-helper delete <job-id>`
+- No automatic cleanup or archival
+- Simple and predictable: users explicitly control what gets deleted
+- Job data includes: raw collected data, metadata, analysis results, generated outputs
 
 ### 2. Profile Configuration
-- **Profile storage**: Built-in vs. user-configurable?
-  - Hardcoded defaults with config file overrides (recommended)
-  - Fully user-defined in config file
-- **Profile parameters**: What can users customize?
-  - Sample count, interval (yes, definitely)
-  - vscsiStats command-line options (probably yes)
-  - Post-collection processing options (maybe)
+
+**Profile Storage**
+- Hardcoded defaults (quick, standard, deep) built into the tool
+- User can override built-in profiles or define custom profiles in config file
+- Config file location: `~/.vscsiStats-helper/config.yaml`
+- Built-in profiles work immediately without any configuration
+
+**Customizable Parameters**
+- Sample count: Number of vscsiStats samples to collect
+- Interval: Seconds between each sample collection
+- No advanced vscsiStats CLI options or post-processing automation (keep it simple)
+
+**Built-in Profiles**
+```yaml
+quick:
+  samples: 10
+  interval_seconds: 30
+  # Total time: 5 minutes
+
+standard:
+  samples: 30
+  interval_seconds: 60
+  # Total time: 30 minutes
+
+deep:
+  samples: 100
+  interval_seconds: 120
+  # Total time: 3 hours 20 minutes
+```
 
 ### 3. Reliability & Error Handling
-- **Connection resilience**: What happens if SSH drops mid-collection?
-  - Auto-reconnect and resume (complex but valuable)
-  - Fail gracefully and preserve partial data (simpler)
-  - Alert/notify user (via what mechanism?)
-- **ESXi host protection**: Safeguards to prevent overwhelming the host?
-  - Limit simultaneous VM monitoring per host
-  - Rate limiting on vscsiStats operations
-  - Health checks before starting collection
 
-### 4. Analysis Flexibility
-- **Filtering UI/UX**: How do users adjust filtering after initial analysis?
-  - Re-run analyze command with different parameters
-  - Interactive mode that prompts for threshold adjustments
-  - Web UI for visual threshold adjustment (future enhancement?)
-- **Multi-phase analysis**: Should tool support?
-  - Separate "peak hours" vs. "off-hours" profiles
-  - Workload comparison across different time ranges
-  - Trend analysis over multiple collection jobs
+**Connection Resilience**
+- Retry SSH connection with exponential backoff (e.g., 3 attempts with increasing delays)
+- On final failure: preserve partial data collected so far
+- Job marked as `failed` status with error details in metadata
+- User can analyze partial data or restart collection
 
-### 5. Output Customization
-- **fio job file granularity**:
-  - One fio job per VM/LUN
-  - One fio job per collection job (multiple VMs aggregated)
-  - User choice with CLI flag
-- **Visualization generation**:
-  - Auto-generate all visualizations by default
-  - On-demand via `--visualize` flag (recommended)
-  - Selective visualization (e.g., `--visualize-iops --visualize-latency`)
-- **Report format**:
-  - Text summary to stdout (current design)
-  - HTML report with embedded graphs
-  - PDF report (future enhancement?)
+**Critical Issue: Orphaned vscsiStats Processes**
+- Failed or abandoned jobs may leave `vscsiStats` running indefinitely on ESXi host
+- **Planned mitigation approaches** (implementation decision TBD):
+  1. Job metadata tracks cleanup status; provide `vscsi-helper cleanup <job-id>` command
+  2. Deploy optional ESXi cronjob to run `vscsiStats -x` after safe timeout period
+  3. On job start, register cleanup handler; on job stop/fail, attempt cleanup
+- This is a critical reliability consideration that must be addressed in MVP
 
-### 6. Multi-Host Support (Future)
+**ESXi Host Protection**
+- No built-in safeguards or rate limiting
+- Trust the user to manage their infrastructure responsibly
+- vscsiStats has minimal performance overhead on ESXi hosts
+- User responsible for not starting excessive concurrent collections
+
+### 4. Deferred Decisions (Post-MVP)
+
+The following items are recognized as valuable but will be addressed after MVP:
+
+**Analysis Flexibility**
+- Multi-phase analysis (peak hours vs. off-hours profiles)
+- Trend analysis across multiple collection jobs
+- Interactive filtering threshold adjustment
+- Users can re-run `analyze` command with different parameters for now
+
+**Output Customization**
+- fio job file granularity options (one per VM/LUN vs. aggregated)
+- Selective visualization generation (generate all by default for now)
+- HTML/PDF report formats (stdout text summary is sufficient for MVP)
+
+**Multi-Host Support**
 - Currently scoped for single host at a time
-- Should we design with multi-host in mind?
-  - Database schema that supports it
-  - Job namespace separation
-  - Aggregate analysis across hosts
+- Architecture should not preclude future multi-host support
+- Job metadata includes host information for future aggregation
 
-### 7. Real-Time Monitoring (Future)
-- Current design: batch collection → batch analysis
-- Should we consider real-time dashboard?
-  - Live IOPS/latency graphs during collection
-  - Early warning of anomalous behavior
-  - Likely a phase 2 feature
+**Real-Time Monitoring**
+- Current design: batch collection → batch analysis (offline)
+- Live dashboards and streaming analysis are phase 2 features
+- Focus on batch workflow reliability first
 
 ## Project Status
 
@@ -374,7 +402,7 @@ This README represents the planning outcome and project vision. Implementation h
 
 ### Next Steps
 
-1. Resolve open questions (prioritize items 1-3)
+1. ✅ ~~Resolve open questions~~ (Complete - see Design Decisions section)
 2. Create detailed technical design document
 3. Set up Python project structure
 4. Implement MVP:
@@ -383,6 +411,7 @@ This README represents the planning outcome and project vision. Implementation h
    - CSV parsing and storage
    - Basic analysis with one filtering method
    - fio job file generation
+   - Job cleanup mechanism (address orphaned vscsiStats processes)
 5. Expand to full feature set
 6. Testing and validation
 
@@ -396,14 +425,14 @@ TBD
 
 ## References
 
-- [VMware vscsiStats Documentation](https://kb.vmware.com/s/article/1002440)
-- [vmdamentals.com: vscsiStats 3D Visualization](https://vmdamentals.com) (original inspiration)
+- [VMware vscsiStats Documentation](https://knowledge.broadcom.com/external/article/310655/using-vscsistats-to-collect-io-and-laten.html)
+- [vmdamentals.com: vscsiStats 3D Visualization](https://vmdamentals.com/?p=722) (original inspiration)
 - [fio - Flexible I/O Tester](https://fio.readthedocs.io/)
 - ESXi Performance Best Practices
 
 ## Contact
 
-Eric - Project Lead
+Eric Parent - Project Lead
 
 ---
 
